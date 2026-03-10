@@ -33,23 +33,30 @@ def run_batch(
 
 def main():
     parser = argparse.ArgumentParser(description="Filter video editing pairs by color difference")
-    parser.add_argument("--input-dir", required=True, help="Directory with src/edited video pairs")
+    parser.add_argument("--src-dir", required=True, help="Directory containing original videos")
+    parser.add_argument("--edited-dir", required=True, help="Directory containing edited videos")
     parser.add_argument("--output", required=True, help="Output JSONL file path")
-    parser.add_argument("--src-pattern", default="src_*.mp4", help="Glob pattern for source videos")
-    parser.add_argument("--edited-pattern", default="edited_*.mp4", help="Glob pattern for edited videos")
+    parser.add_argument("--pattern", default="*.mp4", help="Glob pattern for video files")
     parser.add_argument("--num-frames", type=int, default=16, help="Frames to sample per video")
     parser.add_argument("--threshold", type=float, default=2.0, help="CIEDE2000 threshold for pass/fail")
     parser.add_argument("--workers", type=int, default=8, help="Number of parallel workers")
     args = parser.parse_args()
 
     import glob
-    src_files = sorted(glob.glob(os.path.join(args.input_dir, args.src_pattern)))
-    edited_files = sorted(glob.glob(os.path.join(args.input_dir, args.edited_pattern)))
+    src_files = sorted(glob.glob(os.path.join(args.src_dir, args.pattern)))
 
-    if len(src_files) != len(edited_files):
-        print(f"Warning: {len(src_files)} source videos vs {len(edited_files)} edited videos")
+    pairs = []
+    missing = []
+    for src_path in src_files:
+        filename = os.path.basename(src_path)
+        edited_path = os.path.join(args.edited_dir, filename)
+        if os.path.exists(edited_path):
+            pairs.append((src_path, edited_path))
+        else:
+            missing.append(filename)
 
-    pairs = list(zip(src_files, edited_files))
+    if missing:
+        print(f"Warning: {len(missing)} source videos have no match in edited dir (e.g. {missing[0]})")
     print(f"Processing {len(pairs)} video pairs with {args.workers} workers...")
 
     run_batch(pairs, args.output, num_workers=args.workers, num_frames=args.num_frames, threshold=args.threshold)

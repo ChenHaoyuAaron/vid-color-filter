@@ -41,28 +41,27 @@ Requires Python 3.10+.
 
 ```bash
 vid-color-filter \
-  --input-dir /path/to/video/pairs \
+  --src-dir /path/to/original/videos \
+  --edited-dir /path/to/edited/videos \
   --output results.jsonl \
-  --src-pattern "src_*.mp4" \
-  --edited-pattern "edited_*.mp4" \
   --workers 32 \
   --threshold 2.0 \
   --num-frames 16
 ```
 
+Original and edited videos are matched by filename — a video `clip_001.mp4` in `--src-dir` is paired with `clip_001.mp4` in `--edited-dir`.
+
 **Arguments:**
 
 | Argument | Default | Description |
 |---|---|---|
-| `--input-dir` | (required) | Directory containing video pairs |
+| `--src-dir` | (required) | Directory containing original videos |
+| `--edited-dir` | (required) | Directory containing edited videos |
 | `--output` | (required) | Output JSONL file path |
-| `--src-pattern` | `src_*.mp4` | Glob pattern for source videos |
-| `--edited-pattern` | `edited_*.mp4` | Glob pattern for edited videos |
+| `--pattern` | `*.mp4` | Glob pattern for video files |
 | `--num-frames` | `16` | Number of frames to sample per video |
 | `--threshold` | `2.0` | CIEDE2000 threshold for pass/fail |
 | `--workers` | `8` | Number of parallel workers |
-
-Source and edited videos are matched by sorted filename order.
 
 ### Python API
 
