@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git -C /Users/haoyu/Documents/claude-projects/vid-filt-brainstorm rev-parse HEAD)",
+      "Bash(git -C /Users/haoyu/Documents/claude-projects/vid-filt-brainstorm status)",
+      "Bash(pip install -e \".[dev]\" 2>&1)",
+      "Bash(python -c \"import vid_color_filter; print\\('OK'\\)\")",
+      "Bash(git -C /Users/haoyu/Documents/claude-projects/vid-filt-brainstorm log --oneline -5)",
+      "Bash(python -m pytest tests/test_frame_sampler.py -v 2>&1 | tail -20)",
+      "Bash(python -m pytest tests/test_frame_sampler.py -v 2>&1)",
+      "Bash(python -m pytest tests/test_mask_generator.py -v 2>&1)",
+      "Bash(pip install --force-reinstall scikit-image 2>&1 | tail -5)",
+      "Bash(pip install --force-reinstall scikit-image 2>&1 | tail -10)",
+      "Bash(python -c \"import numpy; print\\('numpy', numpy.__version__\\); from skimage.color import rgb2lab; print\\('skimage ok'\\)\" 2>&1)",
+      "Bash(python -m pytest tests/ -v 2>&1)",
+      "Bash(python -m pytest tests/test_color_diff.py -v 2>&1)",
+      "Bash(python -m pytest -v 2>&1)",
+      "Bash(git init 2>/dev/null; git status)",
+      "Bash(git init && git add -A && git status)"
+    ]
+  }
+}
