@@ -38,6 +38,7 @@ def main():
     input_group.add_argument("--csv", help="CSV file with video1_path and video2_path columns")
     input_group.add_argument("--src-dir", help="Directory containing original videos (use with --edited-dir)")
     parser.add_argument("--edited-dir", help="Directory containing edited videos (use with --src-dir)")
+    parser.add_argument("--root-dir", default="", help="Root directory to prepend to relative paths in CSV")
     parser.add_argument("--output", required=True, help="Output JSONL file path")
     parser.add_argument("--pattern", default="*.mp4", help="Glob pattern for video files (used with --src-dir)")
     parser.add_argument("--num-frames", type=int, default=16, help="Frames to sample per video")
@@ -50,7 +51,9 @@ def main():
         with open(args.csv) as f:
             reader = csv.DictReader(f)
             for row in reader:
-                pairs.append((row["video1_path"], row["video2_path"]))
+                v1 = os.path.join(args.root_dir, row["video1_path"])
+                v2 = os.path.join(args.root_dir, row["video2_path"])
+                pairs.append((v1, v2))
     else:
         if not args.edited_dir:
             parser.error("--edited-dir is required when using --src-dir")
