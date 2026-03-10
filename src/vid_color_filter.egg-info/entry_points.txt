@@ -1,0 +1,2 @@
+[console_scripts]
+vid-color-filter = vid_color_filter.cli:main
