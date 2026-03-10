@@ -39,26 +39,44 @@ Requires Python 3.10+.
 
 ### CLI
 
+**From CSV (recommended):**
+
+```bash
+vid-color-filter \
+  --csv pairs.csv \
+  --output results.jsonl \
+  --workers 32
+```
+
+Where `pairs.csv` has columns `video1_path` (original) and `video2_path` (edited):
+
+```csv
+video1_path,video2_path
+/data/original/clip_001.mp4,/data/edited/clip_001.mp4
+/data/original/clip_002.mp4,/data/edited/clip_002.mp4
+```
+
+**From directories:**
+
 ```bash
 vid-color-filter \
   --src-dir /path/to/original/videos \
   --edited-dir /path/to/edited/videos \
   --output results.jsonl \
-  --workers 32 \
-  --threshold 2.0 \
-  --num-frames 16
+  --workers 32
 ```
 
-Original and edited videos are matched by filename — a video `clip_001.mp4` in `--src-dir` is paired with `clip_001.mp4` in `--edited-dir`.
+Videos are matched by filename — `clip_001.mp4` in `--src-dir` pairs with `clip_001.mp4` in `--edited-dir`.
 
 **Arguments:**
 
 | Argument | Default | Description |
 |---|---|---|
-| `--src-dir` | (required) | Directory containing original videos |
-| `--edited-dir` | (required) | Directory containing edited videos |
+| `--csv` | | CSV file with `video1_path` and `video2_path` columns |
+| `--src-dir` | | Directory containing original videos (alternative to --csv) |
+| `--edited-dir` | | Directory containing edited videos (use with --src-dir) |
 | `--output` | (required) | Output JSONL file path |
-| `--pattern` | `*.mp4` | Glob pattern for video files |
+| `--pattern` | `*.mp4` | Glob pattern for video files (used with --src-dir) |
 | `--num-frames` | `16` | Number of frames to sample per video |
 | `--threshold` | `2.0` | CIEDE2000 threshold for pass/fail |
 | `--workers` | `8` | Number of parallel workers |
