@@ -1,8 +1,0 @@
-pyproject.toml
-src/vid_color_filter/__init__.py
-src/vid_color_filter.egg-info/PKG-INFO
-src/vid_color_filter.egg-info/SOURCES.txt
-src/vid_color_filter.egg-info/dependency_links.txt
-src/vid_color_filter.egg-info/entry_points.txt
-src/vid_color_filter.egg-info/requires.txt
-src/vid_color_filter.egg-info/top_level.txt
