@@ -36,3 +36,36 @@ def sample_frame_pairs(
     src_cap.release()
     edited_cap.release()
     return pairs
+
+
+def sample_frames_as_tensors(
+    src_path: str,
+    edited_path: str,
+    num_frames: int = 16,
+    device: str = "cuda",
+):
+    """Sample aligned frame pairs and return as stacked GPU tensors.
+
+    Reads frames via OpenCV, converts BGR->RGB, and stacks into
+    (N, H, W, 3) uint8 tensors ready for GPU color processing.
+
+    Returns:
+        (src_tensor, edited_tensor) each of shape (N, H, W, 3) on device.
+        Returns (None, None) if no frames could be read.
+    """
+    import torch
+
+    pairs = sample_frame_pairs(src_path, edited_path, num_frames=num_frames)
+    if not pairs:
+        return None, None
+
+    src_frames = []
+    edited_frames = []
+    for src_bgr, edited_bgr in pairs:
+        src_frames.append(cv2.cvtColor(src_bgr, cv2.COLOR_BGR2RGB))
+        edited_frames.append(cv2.cvtColor(edited_bgr, cv2.COLOR_BGR2RGB))
+
+    src_tensor = torch.from_numpy(np.stack(src_frames)).to(device)
+    edited_tensor = torch.from_numpy(np.stack(edited_frames)).to(device)
+
+    return src_tensor, edited_tensor
