@@ -50,26 +50,59 @@ def parse_args():
         help="Glob pattern for video files (used with --src-dir)",
     )
     parser.add_argument(
-        "--num-frames", type=int, default=16,
-        help="Frames to sample per video (default: 16)",
+        "--num-frames", type=int, default=None,
+        help="Frames to sample per video (default: 16, or 32 with --use-scielab)",
     )
     parser.add_argument(
         "--threshold", type=float, default=2.0,
         help="Delta E threshold for pass/fail (default: 2.0)",
     )
     parser.add_argument(
-        "--metric", choices=["cie76", "cie94", "ciede2000"], default="cie94",
-        help="Color difference metric (default: cie94)",
+        "--metric", choices=["cie76", "cie94", "ciede2000"], default=None,
+        help="Color difference metric (default: cie94, or ciede2000 with --use-scielab)",
     )
     parser.add_argument(
-        "--diff-threshold", type=float, default=5.0,
-        help="Lab distance threshold for mask binarization (default: 5.0)",
+        "--diff-threshold", type=float, default=None,
+        help="Edit mask threshold. None = Otsu adaptive (default with --use-scielab). Float = fixed.",
     )
     parser.add_argument(
         "--dilate-kernel", type=int, default=21,
         help="Dilation kernel size for edit mask (default: 21)",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--use-scielab", action="store_true", default=False,
+        help="Enable S-CIELAB temporal pipeline (new scoring method)",
+    )
+    parser.add_argument(
+        "--pixels-per-degree", type=float, default=60.0,
+        help="S-CIELAB viewing condition (default: 60 for desktop monitor ~60cm)",
+    )
+    parser.add_argument(
+        "--global-threshold", type=float, default=None,
+        help="Global color shift threshold (defaults to --threshold value)",
+    )
+    parser.add_argument(
+        "--local-threshold", type=float, default=3.0,
+        help="Local color difference threshold (default: 3.0)",
+    )
+    parser.add_argument(
+        "--chunk-size", type=int, default=8,
+        help="Frames per GPU processing chunk (default: 8). Lower = less memory.",
+    )
+
+    args = parser.parse_args()
+
+    # Apply context-appropriate defaults (None = user didn't specify)
+    if args.num_frames is None:
+        args.num_frames = 32 if args.use_scielab else 16
+    if args.metric is None:
+        args.metric = "ciede2000" if args.use_scielab else "cie94"
+    if args.diff_threshold is None and not args.use_scielab:
+        args.diff_threshold = 5.0  # legacy default
+    if args.global_threshold is None:
+        args.global_threshold = args.threshold  # --threshold is alias for --global-threshold
+
+    return args
 
 
 def load_pairs(args) -> list[tuple[str, str]]:
@@ -142,6 +175,11 @@ def main():
                         diff_threshold=args.diff_threshold,
                         dilate_kernel=args.dilate_kernel,
                         metric=args.metric,
+                        use_scielab=args.use_scielab,
+                        pixels_per_degree=args.pixels_per_degree,
+                        global_threshold=args.global_threshold,
+                        local_threshold=args.local_threshold,
+                        chunk_size=args.chunk_size,
                     )
             f.write(json.dumps(result) + "\n")
             processed += 1
