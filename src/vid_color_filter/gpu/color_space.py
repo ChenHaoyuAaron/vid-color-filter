@@ -24,6 +24,24 @@ def _srgb_to_linear(srgb: torch.Tensor) -> torch.Tensor:
     return torch.where(srgb <= 0.04045, low, high)
 
 
+def rgb_to_xyz(rgb: torch.Tensor) -> torch.Tensor:
+    """Convert batched RGB images to CIE XYZ color space.
+
+    Args:
+        rgb: (B, H, W, 3) uint8 or float32 tensor in [0, 255] or [0, 1].
+
+    Returns:
+        (B, H, W, 3) float32 XYZ tensor.
+    """
+    if rgb.dtype == torch.uint8:
+        rgb = rgb.float() / 255.0
+    elif rgb.max() > 1.0:
+        rgb = rgb / 255.0
+    linear = _srgb_to_linear(rgb)
+    mat = _RGB_TO_XYZ.to(device=linear.device, dtype=linear.dtype)
+    return linear @ mat.T
+
+
 def _lab_f(t: torch.Tensor) -> torch.Tensor:
     """CIE Lab transfer function."""
     return torch.where(
@@ -33,26 +51,15 @@ def _lab_f(t: torch.Tensor) -> torch.Tensor:
     )
 
 
-def rgb_to_lab(rgb: torch.Tensor) -> torch.Tensor:
-    """Convert batched RGB images to CIE Lab color space on GPU.
+def xyz_to_lab(xyz: torch.Tensor) -> torch.Tensor:
+    """Convert CIE XYZ to CIE Lab color space.
 
     Args:
-        rgb: (B, H, W, 3) uint8 or float32 tensor in [0, 255] or [0, 1].
+        xyz: (B, H, W, 3) float32 XYZ tensor.
 
     Returns:
         (B, H, W, 3) float32 Lab tensor. L in [0,100], a/b in approx [-128,127].
     """
-    if rgb.dtype == torch.uint8:
-        rgb = rgb.float() / 255.0
-    elif rgb.max() > 1.0:
-        rgb = rgb / 255.0
-
-    linear = _srgb_to_linear(rgb)
-
-    mat = _RGB_TO_XYZ.to(device=linear.device, dtype=linear.dtype)
-    # (B, H, W, 3) @ (3, 3)^T -> (B, H, W, 3) XYZ
-    xyz = linear @ mat.T
-
     x = xyz[..., 0] / _D65_X
     y = xyz[..., 1] / _D65_Y
     z = xyz[..., 2] / _D65_Z
@@ -66,3 +73,15 @@ def rgb_to_lab(rgb: torch.Tensor) -> torch.Tensor:
     b = 200.0 * (fy - fz)
 
     return torch.stack([L, a, b], dim=-1)
+
+
+def rgb_to_lab(rgb: torch.Tensor) -> torch.Tensor:
+    """Convert batched RGB images to CIE Lab color space on GPU.
+
+    Args:
+        rgb: (B, H, W, 3) uint8 or float32 tensor in [0, 255] or [0, 1].
+
+    Returns:
+        (B, H, W, 3) float32 Lab tensor. L in [0,100], a/b in approx [-128,127].
+    """
+    return xyz_to_lab(rgb_to_xyz(rgb))

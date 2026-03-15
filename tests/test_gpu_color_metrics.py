@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from vid_color_filter.gpu.color_space import rgb_to_lab
+from vid_color_filter.gpu.color_space import rgb_to_lab, rgb_to_xyz
 from vid_color_filter.gpu.color_metrics import (
     delta_e_cie76,
     delta_e_cie94,
@@ -18,6 +18,35 @@ def _make_rgb_tensor(*colors, h=64, w=64):
     for c in colors:
         frames.append(np.full((h, w, 3), c, dtype=np.uint8))
     return torch.from_numpy(np.stack(frames)).to(DEVICE)
+
+
+class TestRgbToXyz:
+    def test_shape_preserved(self):
+        rgb = _make_rgb_tensor((128, 128, 128), (200, 100, 50))
+        xyz = rgb_to_xyz(rgb)
+        assert xyz.shape == (2, 64, 64, 3)
+
+    def test_white_d65(self):
+        white = _make_rgb_tensor((255, 255, 255))
+        xyz = rgb_to_xyz(white)[0, 0, 0].cpu()
+        assert xyz[0].item() == pytest.approx(0.95047, abs=0.01)
+        assert xyz[1].item() == pytest.approx(1.0, abs=0.01)
+        assert xyz[2].item() == pytest.approx(1.08883, abs=0.01)
+
+    def test_black_zero(self):
+        black = _make_rgb_tensor((0, 0, 0))
+        xyz = rgb_to_xyz(black)[0, 0, 0].cpu()
+        assert xyz[0].item() == pytest.approx(0.0, abs=0.001)
+        assert xyz[1].item() == pytest.approx(0.0, abs=0.001)
+        assert xyz[2].item() == pytest.approx(0.0, abs=0.001)
+
+    def test_matches_skimage(self):
+        from skimage.color import rgb2xyz
+        rgb_np = np.array([[[128, 64, 200]]], dtype=np.uint8)
+        expected = rgb2xyz(rgb_np / 255.0)
+        rgb_t = torch.from_numpy(rgb_np).unsqueeze(0).to(DEVICE)
+        result = rgb_to_xyz(rgb_t).cpu().numpy()[0]
+        np.testing.assert_allclose(result, expected, atol=0.005)
 
 
 class TestRgbToLab:
