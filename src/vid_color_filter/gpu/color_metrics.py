@@ -6,19 +6,25 @@ def delta_e_cie76(
     lab1: torch.Tensor,
     lab2: torch.Tensor,
     mask: torch.Tensor | None = None,
+    reduce: str = "mean",
 ) -> torch.Tensor:
     """CIE76 color difference (Euclidean distance in Lab).
 
     Args:
         lab1, lab2: (B, H, W, 3) Lab tensors.
         mask: Optional (B, H, W) bool tensor. True = excluded (edited) pixels.
+        reduce: "mean" returns (B,) per-image means; "none" returns (B, H, W) maps.
 
     Returns:
-        (B,) mean delta E per image in batch over unmasked pixels.
+        (B,) mean delta E per image or (B, H, W) per-pixel map.
     """
     diff = lab1 - lab2
     de = torch.sqrt((diff * diff).sum(dim=-1))
 
+    if reduce == "none":
+        if mask is not None:
+            de = torch.where(~mask, de, torch.tensor(float("nan"), device=de.device))
+        return de
     return _masked_mean_per_image(de, mask)
 
 
@@ -29,15 +35,17 @@ def delta_e_cie94(
     k_L: float = 1.0,
     K1: float = 0.045,
     K2: float = 0.015,
+    reduce: str = "mean",
 ) -> torch.Tensor:
     """CIE94 color difference (graphic arts weights).
 
     Args:
         lab1, lab2: (B, H, W, 3) Lab tensors.
         mask: Optional (B, H, W) bool tensor. True = excluded pixels.
+        reduce: "mean" returns (B,) per-image means; "none" returns (B, H, W) maps.
 
     Returns:
-        (B,) mean delta E per image in batch over unmasked pixels.
+        (B,) mean delta E per image or (B, H, W) per-pixel map.
     """
     L1, a1, b1 = lab1[..., 0], lab1[..., 1], lab1[..., 2]
     L2, a2, b2 = lab2[..., 0], lab2[..., 1], lab2[..., 2]
@@ -61,6 +69,10 @@ def delta_e_cie94(
 
     de = torch.sqrt(term_L * term_L + term_C * term_C + term_H)
 
+    if reduce == "none":
+        if mask is not None:
+            de = torch.where(~mask, de, torch.tensor(float("nan"), device=de.device))
+        return de
     return _masked_mean_per_image(de, mask)
 
 
@@ -71,15 +83,17 @@ def delta_e_ciede2000(
     k_L: float = 1.0,
     k_C: float = 1.0,
     k_H: float = 1.0,
+    reduce: str = "mean",
 ) -> torch.Tensor:
     """CIEDE2000 color difference (full formula, GPU-vectorized).
 
     Args:
         lab1, lab2: (B, H, W, 3) Lab tensors.
         mask: Optional (B, H, W) bool tensor. True = excluded pixels.
+        reduce: "mean" returns (B,) per-image means; "none" returns (B, H, W) maps.
 
     Returns:
-        (B,) mean delta E per image in batch over unmasked pixels.
+        (B,) mean delta E per image or (B, H, W) per-pixel map.
     """
     L1, a1, b1 = lab1[..., 0], lab1[..., 1], lab1[..., 2]
     L2, a2, b2 = lab2[..., 0], lab2[..., 1], lab2[..., 2]
@@ -156,6 +170,10 @@ def delta_e_ciede2000(
 
     de = torch.sqrt(term_L ** 2 + term_C ** 2 + term_H ** 2 + R_T * term_C * term_H)
 
+    if reduce == "none":
+        if mask is not None:
+            de = torch.where(~mask, de, torch.tensor(float("nan"), device=de.device))
+        return de
     return _masked_mean_per_image(de, mask)
 
 
