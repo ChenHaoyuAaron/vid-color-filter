@@ -15,7 +15,7 @@ def score_video_pair_gpu(
     edited_frames: torch.Tensor,
     src_path: str = "",
     threshold: float = 2.0,
-    diff_threshold: float = 5.0,
+    diff_threshold: float | None = 5.0,
     dilate_kernel: int = 21,
     metric: str = "cie94",
     use_scielab: bool = False,
@@ -123,6 +123,7 @@ def _score_scielab(
     all_de_maps = []
     all_masks = []
     all_mean_des = []
+    all_coverages = []
     kernel_cache = {}
 
     for start in range(0, N, chunk_size):
@@ -173,11 +174,13 @@ def _score_scielab(
         all_de_maps.append(de_map)
         all_masks.append(masks)
         all_mean_des.append(mean_de)
+        all_coverages.append(_coverages)
 
     # Concatenate all chunks
-    de_maps = torch.cat(all_de_maps, dim=0)   # (N, H, W)
-    masks = torch.cat(all_masks, dim=0)         # (N, H, W)
-    mean_des = torch.cat(all_mean_des, dim=0)   # (N,)
+    de_maps = torch.cat(all_de_maps, dim=0)       # (N, H, W)
+    masks = torch.cat(all_masks, dim=0)             # (N, H, W)
+    mean_des = torch.cat(all_mean_des, dim=0)       # (N,)
+    coverages = torch.cat(all_coverages, dim=0)     # (N,)
 
     # Temporal aggregation
     median_map, iqr_map = temporal_aggregate(de_maps, masks)
@@ -192,6 +195,9 @@ def _score_scielab(
     valid_des = [d for d in mean_des_list if not np.isnan(d)]
     max_mean_de = max(valid_des) if valid_des else float("nan")
 
+    coverages_list = coverages.cpu().tolist()
+    max_coverage = max(coverages_list) if coverages_list else 0.0
+
     return {
         "video_pair_id": pair_id,
         # New fields
@@ -201,6 +207,7 @@ def _score_scielab(
         "pass_global": scores["pass_global"],
         "pass_local": scores["pass_local"],
         "pass": scores["pass"],
+        "mask_coverage_ratio": max_coverage,
         # Backward compat fields
         "per_frame_mean_delta_e": mean_des_list,
         "mean_delta_e_per_frame": mean_des_list,

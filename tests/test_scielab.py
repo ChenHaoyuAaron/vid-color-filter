@@ -13,33 +13,38 @@ def _make_rgb_tensor(*colors, h=64, w=64):
 class TestCSFKernels:
     def test_build_csf_kernels_returns_three(self):
         from vid_color_filter.gpu.scielab import build_csf_kernels
-        kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
-        assert len(kernels) == 3
+        channel_kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
+        assert len(channel_kernels) == 3
 
-    def test_kernels_sum_to_one(self):
+    def test_component_kernels_sum_to_one(self):
         from vid_color_filter.gpu.scielab import build_csf_kernels
-        kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
-        for k in kernels:
-            assert k.sum().item() == pytest.approx(1.0, abs=0.01)
+        channel_kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
+        for components in channel_kernels:
+            for weight, k in components:
+                assert k.sum().item() == pytest.approx(1.0, abs=0.01)
 
     def test_kernel_shapes_are_1d_and_odd(self):
         from vid_color_filter.gpu.scielab import build_csf_kernels
-        kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
-        for k in kernels:
-            assert k.dim() == 1
-            assert k.shape[0] % 2 == 1
+        channel_kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
+        for components in channel_kernels:
+            for weight, k in components:
+                assert k.dim() == 1
+                assert k.shape[0] % 2 == 1
 
-    def test_achromatic_kernel_largest(self):
+    def test_achromatic_has_most_components(self):
         from vid_color_filter.gpu.scielab import build_csf_kernels
-        kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
-        assert kernels[0].shape[0] >= kernels[1].shape[0]
-        assert kernels[0].shape[0] >= kernels[2].shape[0]
+        channel_kernels = build_csf_kernels(pixels_per_degree=60, device=DEVICE)
+        # O1 (achromatic) has 3 components, O2/O3 have 2 each
+        assert len(channel_kernels[0]) == 3
+        assert len(channel_kernels[1]) == 2
+        assert len(channel_kernels[2]) == 2
 
     def test_kernel_size_capped(self):
         from vid_color_filter.gpu.scielab import build_csf_kernels, _MAX_KERNEL_SIZE
-        kernels = build_csf_kernels(pixels_per_degree=120, device=DEVICE)
-        for k in kernels:
-            assert k.shape[0] <= _MAX_KERNEL_SIZE
+        channel_kernels = build_csf_kernels(pixels_per_degree=120, device=DEVICE)
+        for components in channel_kernels:
+            for weight, k in components:
+                assert k.shape[0] <= _MAX_KERNEL_SIZE
 
 class TestOpponentTransform:
     def test_xyz_to_opponent_shape(self):

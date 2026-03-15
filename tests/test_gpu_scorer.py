@@ -79,6 +79,7 @@ class TestNewScoringPipeline:
         assert "pass" in result
         assert "per_frame_mean_delta_e" in result
         assert "mean_delta_e_per_frame" in result
+        assert "mask_coverage_ratio" in result
 
     def test_identical_videos_pass(self):
         src = torch.full((16, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
