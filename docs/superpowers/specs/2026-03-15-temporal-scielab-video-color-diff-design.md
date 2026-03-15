@@ -37,19 +37,28 @@ Frame Sampling (configurable frame count)
 
 **Purpose**: Filter out spatially isolated pixel-level color differences that are imperceptible to the human visual system, before computing ΔE.
 
-**How it works**:
+**Algorithm** (following Zhang & Wandell, 1997):
 
-1. Convert Lab image to opponent color channels: L (luminance), A (red-green), B (blue-yellow)
-2. Apply Contrast Sensitivity Function (CSF) kernels via convolution to each channel independently:
-   - **L channel**: Highest spatial frequency cutoff (human vision is most sensitive to luminance detail)
-   - **A channel (red-green)**: Lower cutoff
-   - **B channel (blue-yellow)**: Lowest cutoff (human vision is least sensitive to blue-yellow spatial variation)
-3. Convert filtered opponent channels back to Lab space
-4. Compute CIEDE2000 ΔE on the filtered Lab images
+1. Convert RGB to XYZ (requires adding `rgb_to_xyz` to `color_space.py`)
+2. Convert XYZ to Poirson-Wandell opponent color channels (O1, O2, O3) using the transformation matrix:
+   ```
+   O1 =  0.9795 X + 1.5318 Y + 0.1225 Z   (achromatic)
+   O2 = -0.1071 X + 0.3122 Y + 0.0215 Z   (red-green)
+   O3 =  0.0383 X + 0.0023 Y + 0.5765 Z   (blue-yellow)
+   ```
+3. Apply Contrast Sensitivity Function (CSF) kernels via convolution to each opponent channel independently. Each CSF is a weighted sum of 2-3 Gaussians (spatial domain):
+   - **O1 (achromatic)**: `CSF(r) = 0.921 * G(r, σ₁) + 0.105 * G(r, σ₂) - 0.026 * G(r, σ₃)` where σ₁=0.0283°, σ₂=0.133°, σ₃=4.336° (in visual degrees, converted to pixels via `pixels_per_degree`)
+   - **O2 (red-green)**: `CSF(r) = 0.531 * G(r, σ₁) + 0.330 * G(r, σ₂)` where σ₁=0.0392°, σ₂=0.494°
+   - **O3 (blue-yellow)**: `CSF(r) = 0.488 * G(r, σ₁) + 0.371 * G(r, σ₂)` where σ₁=0.0536°, σ₂=0.386°
+   - Kernel size: truncate at 3σ of the largest Gaussian component, must be odd
+   - All kernels are normalized to sum to 1.0
+4. Convert filtered opponent channels back to XYZ (inverse of the matrix above)
+5. Convert XYZ to Lab
+6. Compute CIEDE2000 ΔE on the filtered Lab images
 
-**Key parameter**: `--pixels-per-degree` (default: 60, corresponding to desktop monitor at ~60cm viewing distance). This controls the CSF kernel sizes — higher values mean smaller kernels (finer perception).
+**Key parameter**: `--pixels-per-degree` (default: 60, corresponding to desktop monitor at ~60cm viewing distance). Visual degree σ values are converted to pixel σ values by multiplying with this parameter.
 
-**GPU implementation**: Pre-compute CSF kernels once, apply via `F.conv2d`. Three separable convolutions per frame, minimal overhead.
+**GPU implementation**: Pre-compute CSF kernels once per resolution/viewing-distance combination, cache as tensors. Apply via `F.conv2d` with padding='same'. Three 2D convolutions per frame, minimal overhead.
 
 **Impact**: Codec-induced random per-pixel color noise is smoothed away. Only spatially coherent color differences (perceptible to the human eye) remain in the ΔE map.
 
@@ -69,14 +78,15 @@ Frame Sampling (configurable frame count)
    - Similar to Canny edge detection logic
 4. Morphological dilation with existing kernel as safety margin
 
-**GPU implementation**: `torch.histc` for histogram computation, Otsu threshold via inter-class variance maximization. Hysteresis via iterative `F.max_pool2d` on seed mask with low-threshold gate.
+**GPU implementation**: `torch.histc` for histogram computation, Otsu threshold via inter-class variance maximization. Hysteresis via iterative `F.max_pool2d` on seed mask with low-threshold gate — iterate until convergence (no new pixels added) with a maximum of 50 iterations to bound computation.
 
 ### Module 3: Temporal Aggregation
 
 **Purpose**: Distinguish temporally stable color differences (real) from frame-to-frame fluctuations (codec noise).
 
-For each unmasked pixel position (x, y) across all N sampled frames:
+For each pixel position (x, y) across all N sampled frames:
 
+- **Pixel masking policy**: A pixel is included in temporal aggregation only if it is unmasked in at least 50% of sampled frames. The temporal median/IQR are computed only over the unmasked subset of frames for that pixel. Pixels masked in >50% of frames are excluded from scoring.
 - **Temporal median ΔE(x, y)**: The stable color difference signal at this position. Robust to codec-induced frame-to-frame fluctuation.
 - **Temporal IQR(x, y)**: Inter-quartile range of ΔE across frames. Measures how much the color difference fluctuates.
 
@@ -91,7 +101,7 @@ Interpretation:
 
 **Output**: Two spatial maps — `median_map(H, W)` and `iqr_map(H, W)` — representing the stable color difference signal and its reliability.
 
-**GPU implementation**: `torch.median` and `torch.quantile` along the frame dimension. Requires all N frames' ΔE maps in memory simultaneously (shape: `(N, H, W)`).
+**GPU implementation**: `torch.median` and `torch.quantile` along the frame dimension. Requires all N frames' ΔE maps in memory simultaneously (shape: `(N, H, W)`). For pixels with varying mask status across frames, use `torch.nan_median`/`torch.nanquantile` with masked values set to NaN.
 
 ### Module 4: Spatial Distribution Analysis & Multi-dimensional Scoring
 
@@ -148,8 +158,9 @@ pass = pass_global AND pass_local
 | `--local-threshold` | 3.0 | ΔE threshold for local color difference score |
 | `--threshold` | — | Alias for `--global-threshold` (backward compatibility) |
 | `--metric` | `ciede2000` | Default changed from `cie94` to `ciede2000`. CIE76/CIE94 still available. |
-| `--diff-threshold` | (auto) | Edit mask threshold. Now defaults to Otsu adaptive. Legacy fixed value still accepted. |
+| `--diff-threshold` | `None` | Edit mask threshold. `None` = Otsu adaptive (new default). If a float is provided, use as fixed threshold (legacy behavior). |
 | `--dilate-kernel` | 21 | Mask dilation kernel size (unchanged) |
+| `--chunk-size` | 8 | Frames per GPU processing chunk. Lower values reduce memory usage for high-resolution video. |
 
 ### GPU Compatibility
 
@@ -164,20 +175,40 @@ All new computations have native PyTorch implementations:
 | Temporal IQR | `torch.quantile` (Q75 - Q25) along dim=0 |
 | Spatial percentiles | `torch.quantile` on flattened map |
 
-Memory requirement: `N × H × W` float32 tensor for ΔE maps (32 frames × 1080 × 1920 ≈ 250 MB per video pair). Well within GPU memory for typical cases.
+**Memory budget** (1080p, 32 frames, float32):
+
+| Tensor | Shape | Size |
+|---|---|---|
+| Source + Edited Lab frames | 2 × 32 × 1080 × 1920 × 3 | ~1.5 GB |
+| S-CIELAB filtered Lab (both) | 2 × 32 × 1080 × 1920 × 3 | ~1.5 GB |
+| Per-pixel ΔE maps | 32 × 1080 × 1920 | ~250 MB |
+| Masks (float during dilation) | 32 × 1080 × 1920 | ~250 MB |
+| **Peak total** | | **~3.5 GB** |
+
+For 4K (2160×3840), peak memory quadruples to ~14 GB. To support large resolutions on limited GPU memory, the pipeline should support **frame-chunked processing**: process frames in chunks of `--chunk-size` (default: 8), accumulating per-pixel ΔE maps incrementally. This trades throughput for memory. Maximum supported resolution without chunking: 1080p on 8 GB GPU, 4K on 24 GB GPU.
 
 ### Backward Compatibility
 
+**Breaking changes** (documented):
+- `--num-frames` default changes from 16 → 32 (doubles decode time and memory). Users can pass `--num-frames 16` for old behavior.
+- `--metric` default changes from `cie94` → `ciede2000` (more accurate but slower). Users can pass `--metric cie94` for old behavior.
+- `--diff-threshold` default changes from `5.0` → `None` (Otsu adaptive). Users can pass `--diff-threshold 5.0` for old behavior.
+- Output field `max_mean_delta_e` is replaced by `global_shift_score`. The old field name is retained as an alias pointing to `global_shift_score` for one release cycle.
+
+**Preserved**:
 - Old CIE76/CIE94 metric options remain available via `--metric`
 - `--threshold` still works as alias for `--global-threshold`
-- `per_frame_mean_delta_e` field retained in output
+- `per_frame_mean_delta_e` and `mean_delta_e_per_frame` both retained in output (same data, two field names)
+- `mask_coverage_ratio` retained
 - CPU pipeline (`cli.py`) unchanged; new features in GPU pipeline only
 
 ### Files to Modify/Create
 
 | File | Action | Description |
 |---|---|---|
-| `src/vid_color_filter/gpu/scielab.py` | Create | S-CIELAB spatial filtering (CSF kernels, opponent color conversion) |
+| `src/vid_color_filter/gpu/color_space.py` | Modify | Add `rgb_to_xyz` function needed for S-CIELAB opponent conversion |
+| `src/vid_color_filter/gpu/color_metrics.py` | Modify | Add per-pixel ΔE mode (return `(B, H, W)` maps instead of `(B,)` means) for temporal aggregation |
+| `src/vid_color_filter/gpu/scielab.py` | Create | S-CIELAB spatial filtering (CSF kernels, Poirson-Wandell opponent color conversion) |
 | `src/vid_color_filter/gpu/adaptive_mask.py` | Create | Otsu + hysteresis adaptive mask generation |
 | `src/vid_color_filter/gpu/temporal_aggregator.py` | Create | Temporal median/IQR aggregation and multi-dimensional scoring |
 | `src/vid_color_filter/gpu/batch_scorer.py` | Modify | Integrate new modules into scoring pipeline |
