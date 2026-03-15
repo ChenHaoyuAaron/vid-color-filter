@@ -64,3 +64,37 @@ class TestScoreVideoPairGPU:
         assert src_t is not None
         result = score_video_pair_gpu(src_t, edited_t, src_path=src)
         assert result["pass"] is True
+
+
+class TestNewScoringPipeline:
+    def test_output_has_new_fields(self):
+        src = torch.full((16, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        edited = src.clone()
+        result = score_video_pair_gpu(src, edited, src_path="test.mp4", use_scielab=True)
+        assert "global_shift_score" in result
+        assert "local_diff_score" in result
+        assert "temporal_instability" in result
+        assert "pass_global" in result
+        assert "pass_local" in result
+        assert "pass" in result
+        assert "per_frame_mean_delta_e" in result
+        assert "mean_delta_e_per_frame" in result
+
+    def test_identical_videos_pass(self):
+        src = torch.full((16, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        result = score_video_pair_gpu(src, src.clone(), src_path="test.mp4", use_scielab=True)
+        assert result["pass"] == True
+        assert result["global_shift_score"] < 1.0
+
+    def test_color_shifted_video_detected(self):
+        src = torch.full((16, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        edited = torch.full((16, 64, 64, 3), 148, dtype=torch.uint8, device=DEVICE)
+        result = score_video_pair_gpu(src, edited, src_path="test.mp4", use_scielab=True, global_threshold=1.0)
+        assert result["global_shift_score"] > 1.0
+        assert result["pass_global"] == False
+
+    def test_backward_compat_mode(self):
+        src = torch.full((8, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        result = score_video_pair_gpu(src, src.clone(), src_path="test.mp4")
+        assert "max_mean_delta_e" in result
+        assert "mean_delta_e_per_frame" in result
