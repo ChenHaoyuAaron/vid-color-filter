@@ -135,3 +135,35 @@ class TestCIEDE2000:
         mask = torch.ones(1, 64, 64, dtype=torch.bool, device=DEVICE)
         result = delta_e_ciede2000(lab, lab, mask)
         assert torch.isnan(result[0])
+
+
+class TestPerPixelMode:
+    def test_cie76_returns_spatial_map(self):
+        lab1 = rgb_to_lab(_make_rgb_tensor((128, 128, 128)))
+        lab2 = rgb_to_lab(_make_rgb_tensor((180, 128, 128)))
+        result = delta_e_cie76(lab1, lab2, reduce="none")
+        assert result.shape == (1, 64, 64)
+
+    def test_ciede2000_returns_spatial_map(self):
+        lab1 = rgb_to_lab(_make_rgb_tensor((128, 128, 128)))
+        lab2 = rgb_to_lab(_make_rgb_tensor((180, 128, 128)))
+        result = delta_e_ciede2000(lab1, lab2, reduce="none")
+        assert result.shape == (1, 64, 64)
+
+    def test_per_pixel_mean_matches_default(self):
+        lab1 = rgb_to_lab(_make_rgb_tensor((100, 150, 200)))
+        lab2 = rgb_to_lab(_make_rgb_tensor((110, 140, 210)))
+        mean_result = delta_e_ciede2000(lab1, lab2)
+        pixel_result = delta_e_ciede2000(lab1, lab2, reduce="none")
+        assert pixel_result.mean(dim=(-2, -1))[0].item() == pytest.approx(
+            mean_result[0].item(), rel=0.001
+        )
+
+    def test_per_pixel_with_mask_sets_nan(self):
+        lab1 = rgb_to_lab(_make_rgb_tensor((128, 128, 128)))
+        lab2 = rgb_to_lab(_make_rgb_tensor((180, 128, 128)))
+        mask = torch.zeros(1, 64, 64, dtype=torch.bool, device=DEVICE)
+        mask[0, :32, :] = True
+        result = delta_e_ciede2000(lab1, lab2, mask=mask, reduce="none")
+        assert torch.isnan(result[0, 0, 0])
+        assert not torch.isnan(result[0, 32, 0])
