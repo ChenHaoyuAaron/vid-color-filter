@@ -10,6 +10,7 @@
 - 生成的可视化产物下载到**本地**浏览和标注
 - HTML 报告必须完全自包含（相对路径引用 PNG，无服务器依赖）
 - 标注通过 HTML 页面内嵌 JS 按钮完成，用 `localStorage` 暂存，支持导出 JSON
+- 标注页面需用 **Chrome** 浏览器打开（Firefox/Safari 对 `file://` 协议下的 localStorage 隔离策略不同，跨页面不共享）
 
 ## 流程
 
@@ -90,7 +91,7 @@ calibration_output/
 **实现**：matplotlib `Figure` → `savefig` PNG。不显示，仅保存文件。每个视频对的可视化独立生成，互不依赖。
 
 **关键设计决策**：
-- Heatmap colorbar 范围：固定为 `[0, max(global_threshold * 2, local_threshold * 2)]` 以便跨视频对对比。超出范围的值 clip 到最大值。
+- Heatmap colorbar 范围：calibration 模式下固定为 `[0, 10.0]`（覆盖搜索空间全范围），以便跨视频对对比。超出范围的值 clip 到最大值。
 - 代表帧选取在 batch_scorer 中完成（已有 per-frame mean ΔE），传给 visualizer。
 - PNG 分辨率：源帧原始分辨率，不缩放。Heatmap/mask 同尺寸。
 
@@ -146,6 +147,7 @@ calibration_output/
 
 **网格搜索（标注后评估）**：
 - 输入：`annotations.json`（人工标注的 pass/fail）
+- F1/precision/recall 仅在已标注的边界案例上计算。非边界案例（远离阈值的"显然 pass"或"显然 fail"）不参与评估，假设任何合理阈值都能正确分类它们。
 - 对每组阈值：以管线判定为预测值，人工标注为真值，计算：
   - Precision：管线判 pass 中真正 pass 的比例
   - Recall：真正 pass 中管线判 pass 的比例
@@ -157,16 +159,26 @@ calibration_output/
 新增两个子命令风格的 flag：
 
 ```bash
-# 步骤 1：跑管线（已有功能），加 --visualize 生成可视化
+# 步骤 1：跑全量管线，只输出评分（不生成可视化）
 python run.py --csv data.csv --output calibration_output/scores.jsonl \
-    --use-scielab --visualize --viz-dir calibration_output/reports
+    --use-scielab
 
-# 步骤 2：生成分布图 + 网格搜索预览 + 边界案例 + 索引页
+# 步骤 2：分析分布 + 网格搜索预览 + 筛选边界案例 + 输出子集 CSV
 python -m vid_color_filter.calibration analyze \
     --scores calibration_output/scores.jsonl \
     --output-dir calibration_output
 
-# 步骤 3（标注后）：加载标注，计算 F1
+# 步骤 3：仅对边界案例二次运行管线，生成可视化
+python run.py --csv calibration_output/boundary_subset.csv --output /dev/null \
+    --use-scielab --visualize --viz-dir calibration_output/reports
+
+# 步骤 4：生成 HTML 索引页（在可视化 PNG 就绪后）
+python -m vid_color_filter.calibration build-reports \
+    --scores calibration_output/scores.jsonl \
+    --boundary-cases calibration_output/boundary_cases.json \
+    --viz-dir calibration_output/reports
+
+# 步骤 5（标注后）：加载标注，计算 F1
 python -m vid_color_filter.calibration evaluate \
     --scores calibration_output/scores.jsonl \
     --annotations calibration_output/annotations.json \
@@ -176,8 +188,10 @@ python -m vid_color_filter.calibration evaluate \
 **`--visualize` flag**：
 - 在 `batch_scorer.py` 的 `_score_scielab` 中，保留中间产物（代表帧、ΔE map、mask、median/iqr map）
 - 调用 `visualizer.py` 生成 PNG
-- 调用 `report.py` 生成 HTML
-- 仅为边界案例生成可视化（由评分范围决定），避免为全量上千对视频都生成
+- 调用 `report.py` 生成单视频对 `report.html`
+- 此 flag 仅在步骤 3（边界案例二次运行）中使用，不在全量运行中开启
+
+**二次运行成本**：边界案例通常为全量的 20-40%（约 200-400 对），重新解码+评分需额外 30-60 分钟 GPU 时间。这是可接受的代价，避免了全量生成可视化的存储和时间浪费。
 
 **性能考虑**：
 - 可视化生成是 I/O bound（savefig），不影响 GPU 管线性能
@@ -202,16 +216,17 @@ python -m vid_color_filter.calibration evaluate \
 
 不在管线运行时判断哪些是边界案例（因为此时还不知道全量分布）。流程为：
 
-1. 管线跑全量，只输出 JSONL（`--visualize` 暂不开）
-2. `calibration analyze` 读 JSONL，分析分布，确定边界案例列表
-3. **二次运行管线**，仅对边界案例生成可视化：
-   ```bash
-   python run.py --csv boundary_cases_subset.csv --output /dev/null \
-       --use-scielab --visualize --viz-dir calibration_output/reports
-   ```
-   或者 `calibration analyze` 输出一个子集 CSV，再用 `run.py --csv` 跑
+1. 管线跑全量，只输出 JSONL（不开 `--visualize`）
+2. `calibration analyze` 读 JSONL，分析分布，确定边界案例列表，输出 `boundary_subset.csv`
+3. 二次运行管线，仅对边界案例生成可视化（见 CLI 步骤 3）
+4. `calibration build-reports` 生成 `index.html`（见 CLI 步骤 4）
 
-这样避免为全量上千对视频都生成可视化。
+这样避免为全量上千对视频都生成可视化。二次运行的 GPU 开销约 30-60 分钟（200-400 对边界案例），是可接受的代价。
+
+### 错误处理
+
+- **可视化生成失败**（如视频文件损坏/不可读）：生成一个占位 `report.html`，显示错误信息。该案例仍出现在 `index.html` 中，标注为 "error" 状态。
+- **管线中断恢复**：`scores.jsonl` 逐行写入，重跑时可手动去重已完成的条目。（完整的 `--resume` 功能不在本 spec 范围内。）
 
 ## 文件清单
 
@@ -219,6 +234,6 @@ python -m vid_color_filter.calibration evaluate \
 |---|---|---|
 | `src/vid_color_filter/gpu/visualizer.py` | 新建 | 生成 PNG 可视化 |
 | `src/vid_color_filter/report.py` | 新建 | 生成 HTML 报告（单页 + 索引 + 标注 JS） |
-| `src/vid_color_filter/calibration.py` | 新建 | 分布分析、网格搜索、F1 评估 |
+| `src/vid_color_filter/calibration.py` | 新建 | 分布分析、网格搜索、F1 评估、`build-reports` 索引生成 |
 | `src/vid_color_filter/gpu/batch_scorer.py` | 修改 | `--visualize` 模式下保留中间产物 |
 | `run.py` | 修改 | 新增 `--visualize` / `--viz-dir` 参数 |
