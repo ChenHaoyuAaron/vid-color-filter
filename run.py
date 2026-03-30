@@ -181,6 +181,8 @@ def main():
                         local_threshold=args.local_threshold,
                         chunk_size=args.chunk_size,
                     )
+            result["src_path"] = str(src_path)
+            result["edited_path"] = str(edited_path)
             f.write(json.dumps(result) + "\n")
             processed += 1
             if processed % 100 == 0 and rank == 0:
