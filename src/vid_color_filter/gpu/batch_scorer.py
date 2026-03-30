@@ -10,6 +10,34 @@ from vid_color_filter.gpu.adaptive_mask import generate_adaptive_mask
 from vid_color_filter.gpu.temporal_aggregator import temporal_aggregate, compute_scores
 
 
+def _select_representative_indices(mean_des: list[float], max_repr: int = 5) -> list[int]:
+    """Select representative frame indices based on per-frame mean ΔE.
+
+    Picks: max ΔE frame, min ΔE frame, median ΔE frame, plus evenly spaced.
+    """
+    n = len(mean_des)
+    if n <= max_repr:
+        return list(range(n))
+
+    sorted_indices = sorted(range(n), key=lambda i: mean_des[i])
+    selected = {
+        sorted_indices[-1],    # max
+        sorted_indices[0],     # min
+        sorted_indices[n // 2],  # median
+    }
+
+    # Fill remaining with evenly spaced indices not already selected
+    if len(selected) < max_repr:
+        candidates = [i for i in range(n) if i not in selected]
+        step = max(1, len(candidates) / (max_repr - len(selected) + 1))
+        k = 0
+        while len(selected) < max_repr and k < len(candidates):
+            selected.add(candidates[int(k)])
+            k += step
+
+    return sorted(selected)[:max_repr]
+
+
 def score_video_pair_gpu(
     src_frames: torch.Tensor,
     edited_frames: torch.Tensor,
@@ -23,6 +51,7 @@ def score_video_pair_gpu(
     global_threshold: float | None = None,
     local_threshold: float = 3.0,
     chunk_size: int = 8,
+    visualize: bool = False,
 ) -> dict:
     """Score a video pair on GPU with batched frame processing.
 
@@ -55,6 +84,7 @@ def score_video_pair_gpu(
             pixels_per_degree=pixels_per_degree,
             global_threshold=global_threshold,
             local_threshold=local_threshold, chunk_size=chunk_size,
+            visualize=visualize,
         )
     return _score_legacy(
         src_frames, edited_frames, src_path=src_path,
@@ -110,7 +140,7 @@ def _score_scielab(
     src_frames, edited_frames, src_path="", threshold=2.0,
     diff_threshold=5.0, dilate_kernel=21, metric="cie94",
     pixels_per_degree=60.0, global_threshold=None,
-    local_threshold=3.0, chunk_size=8,
+    local_threshold=3.0, chunk_size=8, visualize=False,
 ):
     """S-CIELAB temporal scoring pipeline."""
     pair_id = os.path.splitext(os.path.basename(src_path))[0] if src_path else ""
@@ -198,7 +228,7 @@ def _score_scielab(
     coverages_list = coverages.cpu().tolist()
     max_coverage = max(coverages_list) if coverages_list else 0.0
 
-    return {
+    result = {
         "video_pair_id": pair_id,
         # New fields
         "global_shift_score": scores["global_shift_score"],
@@ -213,3 +243,15 @@ def _score_scielab(
         "mean_delta_e_per_frame": mean_des_list,
         "max_mean_delta_e": max_mean_de,
     }
+
+    if visualize:
+        repr_indices = _select_representative_indices(mean_des_list)
+        result["src_frames_repr"] = src_frames[repr_indices].cpu().numpy()
+        result["edit_frames_repr"] = edited_frames[repr_indices].cpu().numpy()
+        result["de_maps_repr"] = de_maps[repr_indices].cpu().numpy()
+        result["masks_repr"] = masks[repr_indices].cpu().numpy()
+        result["coverages_repr"] = [coverages_list[i] for i in repr_indices]
+        result["median_map"] = median_map.cpu().numpy()
+        result["iqr_map"] = iqr_map.cpu().numpy()
+
+    return result

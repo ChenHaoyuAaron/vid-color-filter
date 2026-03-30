@@ -89,8 +89,19 @@ def parse_args():
         "--chunk-size", type=int, default=8,
         help="Frames per GPU processing chunk (default: 8). Lower = less memory.",
     )
+    parser.add_argument(
+        "--visualize", action="store_true", default=False,
+        help="Generate PNG visualizations for each scored pair",
+    )
+    parser.add_argument(
+        "--viz-dir", type=str, default=None,
+        help="Output directory for visualizations (required with --visualize)",
+    )
 
     args = parser.parse_args()
+
+    if args.visualize and not args.viz_dir:
+        parser.error("--viz-dir is required when using --visualize")
 
     # Apply context-appropriate defaults (None = user didn't specify)
     if args.num_frames is None:
@@ -180,7 +191,29 @@ def main():
                         global_threshold=args.global_threshold,
                         local_threshold=args.local_threshold,
                         chunk_size=args.chunk_size,
+                        visualize=args.visualize,
                     )
+
+            # Generate visualizations if requested
+            if args.visualize and "src_frames_repr" in result:
+                from vid_color_filter.gpu.visualizer import generate_pair_visualizations
+                from vid_color_filter.report import generate_pair_report, generate_error_report
+
+                try:
+                    generate_pair_visualizations(result, args.viz_dir, vmax=10.0)
+                    pair_dir = os.path.join(args.viz_dir, result["video_pair_id"])
+                    generate_pair_report(result, pair_dir, n_frames=len(result["src_frames_repr"]))
+                except Exception as e:
+                    pair_dir = os.path.join(args.viz_dir, result["video_pair_id"])
+                    generate_error_report(result["video_pair_id"], str(e), pair_dir)
+
+                # Remove intermediate arrays before JSONL write
+                for key in ["src_frames_repr", "edit_frames_repr", "de_maps_repr",
+                            "masks_repr", "coverages_repr", "median_map", "iqr_map"]:
+                    result.pop(key, None)
+
+            result["src_path"] = str(src_path)
+            result["edited_path"] = str(edited_path)
             f.write(json.dumps(result) + "\n")
             processed += 1
             if processed % 100 == 0 and rank == 0:
