@@ -3,7 +3,7 @@ import cv2
 import pytest
 import torch
 
-from vid_color_filter.gpu.batch_scorer import score_video_pair_gpu
+from vid_color_filter.gpu.batch_scorer import score_video_pair_gpu, _select_representative_indices
 from vid_color_filter.frame_sampler import sample_frames_as_tensors
 
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
@@ -99,3 +99,48 @@ class TestNewScoringPipeline:
         result = score_video_pair_gpu(src, src.clone(), src_path="test.mp4")
         assert "max_mean_delta_e" in result
         assert "mean_delta_e_per_frame" in result
+
+    def test_visualize_returns_intermediates(self):
+        src = torch.full((8, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        edited = torch.full((8, 64, 64, 3), 140, dtype=torch.uint8, device=DEVICE)
+        result = score_video_pair_gpu(
+            src, edited, src_path="test.mp4",
+            use_scielab=True, visualize=True, chunk_size=4,
+        )
+        assert "src_frames_repr" in result
+        assert "edit_frames_repr" in result
+        assert "de_maps_repr" in result
+        assert "masks_repr" in result
+        assert "coverages_repr" in result
+        assert "median_map" in result
+        assert "iqr_map" in result
+        assert result["src_frames_repr"].shape[0] <= 5
+        assert result["median_map"].ndim == 2
+
+    def test_no_visualize_no_intermediates(self):
+        src = torch.full((8, 64, 64, 3), 128, dtype=torch.uint8, device=DEVICE)
+        result = score_video_pair_gpu(
+            src, src.clone(), src_path="test.mp4",
+            use_scielab=True, visualize=False, chunk_size=4,
+        )
+        assert "src_frames_repr" not in result
+        assert "median_map" not in result
+
+
+class TestSelectRepresentativeIndices:
+    def test_fewer_than_max(self):
+        indices = _select_representative_indices([1.0, 2.0, 3.0], max_repr=5)
+        assert indices == [0, 1, 2]
+
+    def test_exactly_max(self):
+        indices = _select_representative_indices([1.0, 2.0, 3.0, 4.0, 5.0], max_repr=5)
+        assert indices == [0, 1, 2, 3, 4]
+
+    def test_more_than_max(self):
+        mean_des = [0.5, 3.0, 1.5, 4.0, 0.1, 2.0, 5.0, 1.0]
+        indices = _select_representative_indices(mean_des, max_repr=5)
+        assert len(indices) == 5
+        assert 4 in indices  # min (0.1)
+        assert 6 in indices  # max (5.0)
+        assert all(0 <= i < 8 for i in indices)
+        assert indices == sorted(indices)  # sorted order
