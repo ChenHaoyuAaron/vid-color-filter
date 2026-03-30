@@ -284,3 +284,84 @@ def evaluate_annotations(scores, annotations, out_path) -> dict:
         "best_local_threshold": best_lt_val,
         "best_f1": best_f1,
     }
+
+
+# ---------------------------------------------------------------------------
+# CLI subcommands
+# ---------------------------------------------------------------------------
+
+def _cmd_analyze(args):
+    """Subcommand: analyze scores -> distribution, grid preview, boundary cases."""
+    scores = load_scores(args.scores)
+    os.makedirs(args.output_dir, exist_ok=True)
+
+    print(f"Loaded {len(scores)} scores from {args.scores}")
+
+    generate_distribution_html(scores, os.path.join(args.output_dir, "distribution.html"))
+    print("  -> distribution.html")
+
+    grid_search_preview(scores, os.path.join(args.output_dir, "grid_search_preview.html"))
+    print("  -> grid_search_preview.html")
+
+    boundary, csv_path = select_boundary_cases(scores, args.output_dir)
+    print(f"  -> {len(boundary)} boundary cases -> boundary_cases.json, {os.path.basename(csv_path)}")
+
+
+def _cmd_build_reports(args):
+    """Subcommand: build index.html after visualizations are generated."""
+    from vid_color_filter.report import generate_index_page
+
+    with open(args.boundary_cases) as f:
+        boundary = json.load(f)
+
+    generate_index_page(boundary, args.viz_dir)
+    print(f"  -> index.html ({len(boundary)} cases)")
+
+
+def _cmd_evaluate(args):
+    """Subcommand: evaluate annotations -> F1 grid search results."""
+    scores = load_scores(args.scores)
+    with open(args.annotations) as f:
+        annotations = json.load(f)
+
+    os.makedirs(args.output_dir, exist_ok=True)
+    out_path = os.path.join(args.output_dir, "grid_search_results.html")
+    best = evaluate_annotations(scores, annotations, out_path)
+    print(f"Best: global={best['best_global_threshold']}, "
+          f"local={best['best_local_threshold']}, F1={best['best_f1']:.3f}")
+    print("  -> grid_search_results.html")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Calibration analysis tools")
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    # analyze
+    p_analyze = sub.add_parser("analyze", help="Analyze score distribution and select boundary cases")
+    p_analyze.add_argument("--scores", required=True, help="Path to scores.jsonl")
+    p_analyze.add_argument("--output-dir", required=True, help="Output directory")
+
+    # build-reports
+    p_build = sub.add_parser("build-reports", help="Build index.html after visualizations")
+    p_build.add_argument("--boundary-cases", required=True, help="Path to boundary_cases.json")
+    p_build.add_argument("--viz-dir", required=True, help="Directory with visualization reports")
+
+    # evaluate
+    p_eval = sub.add_parser("evaluate", help="Evaluate annotations with F1 grid search")
+    p_eval.add_argument("--scores", required=True, help="Path to scores.jsonl")
+    p_eval.add_argument("--annotations", required=True, help="Path to annotations.json")
+    p_eval.add_argument("--output-dir", required=True, help="Output directory")
+
+    args = parser.parse_args()
+    if args.command == "analyze":
+        _cmd_analyze(args)
+    elif args.command == "build-reports":
+        _cmd_build_reports(args)
+    elif args.command == "evaluate":
+        _cmd_evaluate(args)
+
+
+if __name__ == "__main__":
+    main()
